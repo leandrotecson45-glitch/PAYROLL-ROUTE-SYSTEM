@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Company Route System</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+
+<style>
+body{
+  margin:0;
+  font-family:Arial;
+  background:#eef2f7;
+}
+
+/* ================= HEADER (CENTERED) ================= */
+.header{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+  background:#040720;
+  color:#fff;
+  padding:16px;
+}
+
+.header img{
+  width:80px;
+  height:80px;
+  border-radius:5px;
+  object-fit:cover;
+  background:#fff;
+  margin-bottom:10px;
+}
+
+.header h2{
+  margin:0;
+  font-size:22px;
+}
+
+.header .sub{
+  font-size:12px;
+  opacity:0.9;
+}
+
+/* ================= BODY ================= */
+.container{padding:12px;}
+
+.card{
+  background:#fff;
+  padding:10px;
+  margin-top:8px;
+  border-radius:10px;
+  box-shadow:0 2px 6px rgba(0,0,0,0.05);
+}
+
+input,textarea,button{
+  width:100%;
+  padding:10px;
+  margin-top:6px;
+  border-radius:8px;
+  border:1px solid #ccc;
+  font-size:14px;
+}
+
+button{
+  background:#2C3539;
+  color:#fff;
+  border:none;
+  font-weight:bold;
+}
+
+.row{
+  display:grid;
+  grid-template-columns:1fr 1fr auto;
+  gap:6px;
+}
+
+.small{
+  font-size:12px;
+  color:#666;
+}
+
+#map{
+  height:50vh;
+  margin-top:10px;
+  border-radius:10px;
+}
+
+.result{
+  background:#dbeafe;
+  padding:10px;
+  margin-top:10px;
+  border-radius:8px;
+  font-weight:bold;
+}
+</style>
+</head>
+
+<body>
+
+<script>
+// 🔥 FIXED LOGO (change link anytime here)
+const LOGO_URL = "https://i.postimg.cc/hvfr0LSh/ostrom-climate-solutions-inc-logo.jpg";
+</script>
+
+<!-- HEADER -->
+<div class="header">
+  <img id="logoPreview" src="" alt="logo">
+  <h2>OSTROM ROUTE SYSTEM</h2>
+  <div class="sub">GPS Payroll & Field Tracking</div>
+</div>
+
+<div class="container">
+
+<!-- GEO TAG PHOTO -->
+<div class="card">
+  <b>Geo-tag Photos</b>
+  <input type="file" id="photos" multiple accept="image/*">
+</div>
+
+<!-- LIST -->
+<div id="list"></div>
+
+<button onclick="addManual()">+ Add Coordinate</button>
+
+<!-- RATE -->
+<div class="card">
+  <b>Rate per KM</b>
+  <input id="rate" type="number" step="0.01" value="10.00">
+</div>
+
+<button onclick="generate()">Generate Route</button>
+
+<div class="result" id="result">Waiting...</div>
+
+<div id="map"></div>
+
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
+
+<script>
+
+let map=L.map('map').setView([15.5,120.9],11);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+ attribution:'© OSM'
+}).addTo(map);
+
+let line;
+
+/* ================= LOAD LOGO ================= */
+document.getElementById("logoPreview").src = LOGO_URL;
+
+/* ================= ADD COORD ================= */
+function addManual(lat="",lon=""){
+
+  let div=document.createElement("div");
+  div.className="card";
+
+  div.innerHTML=`
+    <div class="row">
+      <input value="${lat}" placeholder="lat">
+      <input value="${lon}" placeholder="lon">
+      <button onclick="this.parentNode.parentNode.remove()">✕</button>
+    </div>
+    <div class="small">Manual / Geo-tag</div>
+  `;
+
+  document.getElementById("list").appendChild(div);
+}
+
+/* ================= GEO TAG ================= */
+document.getElementById("photos").addEventListener("change",e=>{
+
+  [...e.target.files].forEach(file=>{
+
+    let r=new FileReader();
+
+    r.onload=ev=>{
+
+      let img=new Image();
+
+      img.onload=()=>{
+
+        EXIF.getData(img,function(){
+
+          let lat=EXIF.getTag(this,"GPSLatitude");
+          let lon=EXIF.getTag(this,"GPSLongitude");
+          let latRef=EXIF.getTag(this,"GPSLatitudeRef");
+          let lonRef=EXIF.getTag(this,"GPSLongitudeRef");
+
+          if(lat && lon){
+
+            let la=toDD(lat,latRef).toFixed(6);
+            let lo=toDD(lon,lonRef).toFixed(6);
+
+            addManual(la,lo);
+
+          }
+        });
+      };
+
+      img.src=ev.target.result;
+    };
+
+    r.readAsDataURL(file);
+  });
+});
+
+/* ================= GPS CONVERT ================= */
+function toDD(v,r){
+  let d=v[0]+v[1]/60+v[2]/3600;
+  return (r=="S"||r=="W")?-d:d;
+}
+
+/* ================= GET POINTS ================= */
+function getPoints(){
+
+  let pts=[];
+
+  document.querySelectorAll(".card").forEach(c=>{
+
+    let i=c.querySelectorAll("input");
+    if(i.length<2) return;
+
+    let a=parseFloat(i[0].value);
+    let b=parseFloat(i[1].value);
+
+    if(!isNaN(a)&&!isNaN(b)){
+      pts.push([a,b]);
+    }
+  });
+
+  return pts;
+}
+
+/* ================= ROUTE ================= */
+async function generate(){
+
+  let pts=getPoints();
+
+  if(pts.length<2){
+    alert("Need at least 2 points");
+    return;
+  }
+
+  let coords=pts.map(p=>p[1]+","+p[0]).join(";");
+
+  let url="https://router.project-osrm.org/route/v1/driving/"+coords+"?overview=full&geometries=geojson";
+
+  try{
+
+    let res=await fetch(url);
+    let data=await res.json();
+
+    if(!data.routes || !data.routes[0]){
+      alert("No route found");
+      return;
+    }
+
+    let route=data.routes[0].geometry.coordinates;
+
+    let latlngs=route.map(p=>[p[1],p[0]]);
+
+    if(line) map.removeLayer(line);
+
+    line=L.polyline(latlngs,{
+      color:"#0d6efd",
+      weight:5
+    }).addTo(map);
+
+    map.fitBounds(line.getBounds());
+
+    let km=data.routes[0].distance/1000;
+    let rate=parseFloat(document.getElementById("rate").value||0);
+
+    document.getElementById("result").innerHTML=
+      "📏 TOTAL KM: "+km.toFixed(2)+"<br>"+
+      "💰 TOTAL PAY: ₱"+(km*rate).toFixed(2);
+
+  }catch(e){
+    alert("Routing failed");
+  }
+}
+
+addManual();
+addManual();
+
+</script>
+
+</body>
+</html>
